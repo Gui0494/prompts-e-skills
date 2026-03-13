@@ -114,55 +114,35 @@ O agent loop é o núcleo de execução do CLI Agent. Ele recebe uma tarefa, int
 O mode gate é a primeira verificação do loop. Ele restringe quais tools estão disponíveis baseado no modo atual.
 
 ```typescript
-const MODE_TOOL_MATRIX: Record<Mode, ToolPermission[]> = {
-  CHAT: [
-    { tool: 'fs_read', permission: 'allow' },
-    { tool: 'fs_glob', permission: 'allow' },
-    { tool: 'fs_grep', permission: 'allow' },
-    // Tudo que modifica → deny
-    { tool: 'shell', permission: 'deny' },
-    { tool: 'fs_write', permission: 'deny' },
-    { tool: 'git', permission: 'deny' },
-    { tool: 'preview', permission: 'deny' },
-  ],
+// IMPORTANTE: A fonte de verdade para permissões é specs/contracts.md seção 5.
+// Este trecho é uma visão simplificada. Para a matriz completa com 12 classes
+// de permissão (read, write-local, shell-safe, shell-unsafe, git-local,
+// git-remote, network, install, preview, deploy, publish, db-write),
+// consulte contracts.md → MODE_PERMISSION_MATRIX.
 
-  PLAN: [
-    { tool: 'fs_read', permission: 'allow' },
-    { tool: 'fs_glob', permission: 'allow' },
-    { tool: 'fs_grep', permission: 'allow' },
-    { tool: 'web_search', permission: 'allow' },
-    { tool: 'web_fetch', permission: 'allow' },
-    // Tudo que modifica → deny
-    { tool: 'shell', permission: 'deny' },
-    { tool: 'fs_write', permission: 'deny' },
-    { tool: 'git', permission: 'deny' },
-    { tool: 'preview', permission: 'deny' },
-  ],
+// Visão simplificada por modo:
+//
+// CHAT:     apenas leitura (fs_read, fs_glob, fs_grep)
+// PLAN:     leitura + pesquisa web (web_search, web_fetch)
+// ACT:      tudo com aprovação individual (ask)
+// AUTO:     leitura/escrita/shell-safe/git-local/rede/preview liberados;
+//           shell-unsafe/git-remote/install SEMPRE pedem confirmação;
+//           deploy/publish/db-write SEMPRE negados
+// RESEARCH: leitura + pesquisa web
 
-  ACT: [
-    { tool: '*', permission: 'ask' },  // tudo requer aprovação por padrão
-    { tool: 'fs_read', permission: 'allow' },
-    { tool: 'fs_glob', permission: 'allow' },
-    { tool: 'fs_grep', permission: 'allow' },
-  ],
+// Exemplo de resolução de permissão:
+function resolvePermission(mode: Mode, toolCall: ToolCall): PermissionLevel {
+  // 1. Determinar classe de permissão da tool
+  const permClass = TOOL_PERMISSION_MAP[toolCall.tool];
 
-  AUTO: [
-    { tool: '*', permission: 'allow' },  // tudo liberado (aprovação prévia)
-    // exceto comandos na blocklist → deny sempre
-  ],
+  // 2. Se é shell, reclassificar baseado no comando
+  if (permClass === PermissionClass.SHELL_SAFE && isInWarnList(toolCall.command)) {
+    permClass = PermissionClass.SHELL_UNSAFE;
+  }
 
-  RESEARCH: [
-    { tool: 'fs_read', permission: 'allow' },
-    { tool: 'fs_glob', permission: 'allow' },
-    { tool: 'fs_grep', permission: 'allow' },
-    { tool: 'web_search', permission: 'allow' },
-    { tool: 'web_fetch', permission: 'allow' },
-    // Tudo que modifica → deny
-    { tool: 'shell', permission: 'deny' },
-    { tool: 'fs_write', permission: 'deny' },
-    { tool: 'git', permission: 'deny' },
-  ],
-};
+  // 3. Consultar matriz
+  return MODE_PERMISSION_MATRIX[mode][permClass];
+}
 ```
 
 ## 4. Autocorreção

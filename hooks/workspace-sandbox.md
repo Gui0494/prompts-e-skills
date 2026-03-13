@@ -113,3 +113,21 @@ Execução silenciosa, sem mensagem extra.
 - **Symlink malicioso:** `/workspace/link → /etc/` → bloqueado (realpath fora).
 - **Novo diretório:** `/workspace/new/dir/file.ts` → permitido (dentro do workspace).
 - **Home dir:** `~/file.txt` → bloqueado (fora do workspace).
+
+## Cross-Platform
+
+```typescript
+// Normalização de paths cross-platform
+function normalizePath(p: string): string {
+  // Windows: converter backslash para forward slash para comparação
+  return path.resolve(p).replace(/\\/g, '/');
+}
+
+// Em Windows, a comparação com path.sep pode falhar
+// porque path.resolve retorna backslash mas o input pode vir com forward slash.
+// Sempre normalizar antes de comparar.
+
+// WSL: paths /mnt/c/... mapeiam para C:\ do Windows.
+// O workspace sandbox deve respeitar o path como está no sistema operacional atual.
+// Se estamos em WSL, /mnt/c é um path válido e o sandbox funciona normalmente.
+```

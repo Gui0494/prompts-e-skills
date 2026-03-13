@@ -93,11 +93,10 @@ Skills disponíveis:
   implement-minimal-diff Faz mudanças pequenas e localizadas  [disponível]
   test-lint-fix         Roda testes, lint e typecheck          [disponível]
   current-docs          Consulta docs atuais via web           [requer web_search]
-  bug-investigator      Reproduz bug e encontra causa raiz     [disponível]
   git-pr-helper         Gera branch, commit, PR                [requer git]
   security-review       Analisa segurança do código            [disponível]
   dependency-research   Pesquisa versões e compatibilidade     [requer web_search]
-  release-deploy-check  Checklist de deploy                    [disponível]
+  release-deploy-checklist  Checklist de deploy                [disponível]
   project-conventions   Aplica padrões do projeto              [disponível]
   docs-writer           Atualiza documentação                  [disponível]
 ```
@@ -223,11 +222,14 @@ limits:
 Quando múltiplas skills podem ser ativadas, o agent segue esta prioridade:
 
 1. **Skill invocada manualmente** — sempre tem prioridade máxima.
-2. **current-docs** — se a tarefa envolve API/SDK/framework, SEMPRE roda antes de qualquer implementação.
-3. **repo-intel** — se o project context está vazio, roda antes de qualquer outra skill.
-4. **security-review** — roda depois de implementação, antes de commit/push.
-5. **test-lint-fix** — roda depois de implementação, depois de security-review.
-6. **Outras skills** — ordem definida pelo agent loop baseado no contexto.
+2. **repo-intel** — se o project context está vazio, roda antes de qualquer outra skill.
+3. **current-docs** — se a tarefa envolve API/SDK/framework, SEMPRE roda antes de qualquer implementação. **BLOQUEANTE:** se não houver ferramenta de pesquisa, a implementação NÃO prossegue.
+4. **test-lint-fix** — roda depois de implementação (primeiro).
+5. **security-review** — roda depois de test-lint-fix (segundo).
+6. **git-pr-helper** — roda depois de security-review, se commit necessário (terceiro).
+7. **Outras skills** — ordem definida pelo agent loop baseado no contexto.
+
+> **Referência canônica:** ver `specs/contracts.md` seções 8 e 9 para a ordem definitiva.
 
 ## 8. Tratamento de Erros em Skills
 

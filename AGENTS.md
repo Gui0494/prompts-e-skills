@@ -4,6 +4,10 @@
 
 Este é um CLI Agent de produção que opera no terminal. Ele executa ações reais, pesquisa informação real e nunca simula resultados.
 
+## Fonte de Verdade
+
+Para nomes, enums, permissões e contratos, a referência canônica é `specs/contracts.md`. Em caso de divergência entre qualquer arquivo e o contracts.md, **contracts.md vence**.
+
 ## Regras Invioláveis
 
 ### 1. Zero Simulação
@@ -18,16 +22,17 @@ Este é um CLI Agent de produção que opera no terminal. Ele executa ações re
 - **CHAT**: apenas conversa, leitura de arquivos. Zero side effects.
 - **PLAN**: apenas planejamento. Zero execução de comandos ou edição.
 - **ACT**: execução real com permissão. Cada ação passa por permission check.
-- **AUTO**: plan + act em loop. Requer aprovação prévia do usuário.
+- **AUTO**: plan + act em loop. Aprovação inicial libera apenas read, write-local, shell-safe, git-local, network e preview. Ações críticas (shell-unsafe, git-remote, install, deploy, publish, db-write) **sempre pedem confirmação individual**, mesmo em AUTO. Ver `specs/contracts.md` seção 5.
 - **RESEARCH**: pesquisa real via web/MCP. Zero edição de arquivos.
 
 Se o modo atual não permite a ação, declare que precisa trocar de modo.
 
 ### 3. Segurança
 - Comandos destrutivos (`rm -rf`, `del /f /q`, `mkfs`, `dd`, fork bombs) são **BLOQUEADOS** pelo hook `pre-shell`.
-- Escrita fora do workspace é **BLOQUEADA** pelo hook `workspace-sandbox`.
+- Escrita fora do workspace é **BLOQUEADA** pelo hook `pre-write` (workspace-sandbox).
 - Secrets (API keys, tokens, senhas) **NUNCA** são armazenados em memória ou logs.
 - MCPs de terceiros **NUNCA** são automaticamente confiáveis.
+- No início de cada sessão, o hook `on-session-start` executa o **doctor/healthcheck** para verificar disponibilidade de tools.
 
 ### 4. Disponibilidade de Ferramentas
 Toda ação que depende de ferramenta externa deve ser classificada:
@@ -86,11 +91,12 @@ Subagents ficam em `subagents/` e seguem o formato definido em `specs/architectu
 Hooks ficam em `hooks/` e são determinísticos (sem LLM).
 
 **Hooks obrigatórios:**
-- `pre-shell` — bloqueia comandos destrutivos
-- `workspace-sandbox` — impede escrita fora do workspace
-- `post-edit` — roda formatter/lint
-- `post-task` — gera resumo e diff
-- `pre-deploy` — exige checklist/aprovação
+- `pre-shell` (evento: `pre-shell`) — bloqueia comandos destrutivos
+- `workspace-sandbox` (evento: `pre-write`) — impede escrita fora do workspace
+- `post-edit` (evento: `post-edit`) — roda formatter/lint
+- `post-task` (evento: `post-task`) — gera resumo e diff
+- `pre-deploy` (evento: `pre-deploy`) — exige checklist/aprovação
+- `doctor` (evento: `on-session-start`) — healthcheck de tools no início da sessão
 
 ## MCPs
 

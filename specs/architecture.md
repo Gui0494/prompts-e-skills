@@ -206,16 +206,21 @@ interface Hook {
   handler(context: HookContext): Promise<HookResult>;
 }
 
+// Referência canônica: specs/contracts.md seção 2
 type HookEvent =
-  | 'pre-shell'      // antes de executar comando shell
-  | 'post-edit'      // depois de editar arquivo
-  | 'post-task'      // ao finalizar tarefa
-  | 'pre-deploy'     // antes de deploy
-  | 'pre-git-push'   // antes de git push
-  | 'on-error';      // quando ocorre erro
+  | 'pre-shell'          // antes de executar comando shell
+  | 'pre-write'          // antes de escrever/criar arquivo (workspace sandbox)
+  | 'post-edit'          // depois de editar arquivo existente
+  | 'post-task'          // ao finalizar tarefa
+  | 'pre-deploy'         // antes de deploy
+  | 'pre-git-push'       // antes de git push
+  | 'on-error'           // quando ocorre erro
+  | 'on-session-start';  // início de sessão (doctor/healthcheck)
 ```
 
 **Diferença de skills:** Hooks são determinísticos. Não envolvem LLM. São regras fixas que sempre executam da mesma forma.
+
+> **Nota:** A lista completa de hook events, actions e mapeamentos está em `specs/contracts.md` seção 2. Em caso de divergência, o contracts.md é a fonte de verdade.
 
 ### 2.8 Context / Memory
 

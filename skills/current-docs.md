@@ -56,9 +56,19 @@ patterns:
    │   ├── Filtrar resultados: priorizar docs oficiais
    │   └── web_fetch nos top 3 resultados
    └── Se NENHUMA ferramenta disponível:
-       └── DECLARAR: "Não posso consultar documentação atualizada.
-            Ferramentas de pesquisa não estão configuradas.
-            Respondendo com conhecimento que pode estar desatualizado."
+       └── BLOQUEAR IMPLEMENTAÇÃO. Declarar:
+            "Não posso prosseguir com a implementação.
+             Esta tarefa depende de API/SDK/framework externo
+             e nenhuma ferramenta de pesquisa está disponível
+             (web_search, web_fetch, MCP docs).
+             Sem consultar documentação atual, há risco de
+             implementar com API desatualizada ou incorreta.
+             Para habilitar:
+             1. Configure web_search tool, ou
+             2. Configure MCP docs server, ou
+             3. Use /mode research para pesquisar manualmente antes."
+       └── NÃO prosseguir com implementação baseada em conhecimento
+            possivelmente desatualizado. Este é um bloqueio intencional.
 
 3. EXTRAIR INFORMAÇÃO RELEVANTE
    ├── Sintaxe e API atual
@@ -72,11 +82,11 @@ patterns:
 
 ## Regras
 
-1. **Obrigatória** — esta skill DEVE rodar antes de implementar com qualquer API externa.
+1. **Obrigatória e BLOQUEANTE** — esta skill DEVE rodar antes de implementar com qualquer API externa. Se não tiver ferramenta de pesquisa, a implementação NÃO prossegue.
 2. **Nunca pular** — mesmo que o agent "saiba" a API, consultar porque pode ter mudado.
 3. **Citar fonte** — sempre incluir URL da documentação consultada.
 4. **Versão específica** — buscar docs da versão que está no projeto, não da latest.
-5. **Declarar indisponibilidade** — se não puder pesquisar, avisar claramente.
+5. **Nunca fazer fallback para "conhecimento possivelmente desatualizado"** — se não puder pesquisar, parar e informar. Não implementar no chute.
 
 ## Limites
 - Timeout: 30s por consulta web.
@@ -89,7 +99,7 @@ patterns:
 |---|---|---|
 | Docs desatualizadas | Site oficial com cache | Tentar URL direta da versão |
 | Versão não encontrada | Versão muito antiga/nova | Buscar versão mais próxima |
-| Nenhuma ferramenta | Sem web_search e sem MCP | Declarar indisponibilidade claramente |
+| Nenhuma ferramenta | Sem web_search e sem MCP | **BLOQUEAR implementação**. Não prosseguir sem docs reais. |
 | Conteúdo muito grande | Página com muita informação | Filtrar por seção relevante |
 
 ## Exemplo Prático

@@ -1,47 +1,57 @@
-# Memory — Especificação
+# Memory — Especificação (v1)
 
 ## 1. Visão Geral
 
-O sistema de memória gerencia todo o estado que o agent precisa para operar de forma coerente durante uma sessão e entre sessões.
+O sistema de memória gerencia todo o estado que o agent precisa para operar de forma coerente durante uma sessão.
 
 **Princípio:** Memória não é simulada. Toda informação armazenada vem de ações reais, leituras reais ou resultados reais de ferramentas.
 
-## 2. Camadas de Memória
+### Escopo da v1
+
+A v1 foca em memória **de sessão** e **de projeto (convenções + cache)**. Memória global sofisticada (preferências cross-projeto, fatos aprendidos com confiança, file importance maps) fica para a v2.
 
 ```
-┌─────────────────────────────────────────┐
-│           MEMÓRIA IMEDIATA              │
-│  Contexto da chamada LLM atual          │
-│  - system prompt                        │
-│  - mensagens recentes                   │
-│  - tool results pendentes               │
-│  Duração: uma iteração do loop          │
-├─────────────────────────────────────────┤
-│           MEMÓRIA DE SESSÃO             │
-│  Estado persistente durante a sessão    │
-│  - modo atual                           │
-│  - plano ativo                          │
-│  - histórico de conversa               │
-│  - cache de arquivos                    │
-│  - project context                      │
-│  Duração: uma sessão do agent           │
-├─────────────────────────────────────────┤
-│           MEMÓRIA DE PROJETO            │
-│  Persistida em disco no workspace       │
-│  - .agent/memory.json                   │
-│  - .agent/conventions.json              │
-│  - .agent/history/                      │
-│  Duração: vida do projeto               │
-├─────────────────────────────────────────┤
-│           MEMÓRIA GLOBAL                │
-│  Preferências do usuário                │
-│  - ~/.config/cli-agent/preferences.json │
-│  - ~/.config/cli-agent/trusted-mcps.json│
-│  Duração: permanente                    │
-└─────────────────────────────────────────┘
+┌──────────────────────────── v1 ──────────────────────────────┐
+│                                                              │
+│  ┌─────────────────────────────────────────┐                 │
+│  │           MEMÓRIA IMEDIATA              │                 │
+│  │  Contexto da chamada LLM atual          │                 │
+│  │  - system prompt                        │                 │
+│  │  - mensagens recentes                   │                 │
+│  │  - tool results pendentes               │                 │
+│  │  Duração: uma iteração do loop          │                 │
+│  ├─────────────────────────────────────────┤                 │
+│  │           MEMÓRIA DE SESSÃO             │                 │
+│  │  Estado persistente durante a sessão    │                 │
+│  │  - modo atual                           │                 │
+│  │  - plano ativo                          │                 │
+│  │  - histórico de conversa (curto)        │                 │
+│  │  - cache de arquivos (leve)             │                 │
+│  │  - project context                      │                 │
+│  │  - doctor result (healthcheck)          │                 │
+│  │  - approval memory (aprovações ativas)  │                 │
+│  │  Duração: uma sessão do agent           │                 │
+│  ├─────────────────────────────────────────┤                 │
+│  │     MEMÓRIA DE PROJETO (leve)           │                 │
+│  │  Persistida em disco no workspace       │                 │
+│  │  - .agent/conventions.json              │                 │
+│  │  - .agent/cache/repo-intel.json         │                 │
+│  │  Duração: vida do projeto               │                 │
+│  └─────────────────────────────────────────┘                 │
+│                                                              │
+├──────────────────────────── v2 (futuro) ─────────────────────┤
+│                                                              │
+│  - Memória global (~/.config/cli-agent/)                     │
+│  - Fatos aprendidos com score de confiança                   │
+│  - Histórico de sessões por data                             │
+│  - File importance maps                                      │
+│  - Preferências cross-projeto                                │
+│  - Trusted MCPs persistidos                                  │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-## 3. Memória Imediata
+## 2. Memória Imediata
 
 Montada a cada iteração do agent loop. É o contexto enviado ao LLM.
 
@@ -74,43 +84,40 @@ interface CompressionStrategy {
 }
 
 const COMPRESSION_THRESHOLDS = {
-  // Quando contexto atinge 70% do limite, comprime tool results
-  toolResultPrune: 0.7,
-  // Quando atinge 80%, sumariza mensagens antigas
-  messageSummarize: 0.8,
-  // Quando atinge 90%, comprime file cache
-  fileCacheCompress: 0.9,
-  // Quando atinge 95%, trunca conversa
-  conversationTruncate: 0.95,
+  toolResultPrune: 0.7,       // 70% do limite → comprime tool results
+  messageSummarize: 0.8,      // 80% → sumariza mensagens antigas
+  fileCacheCompress: 0.9,     // 90% → comprime file cache
+  conversationTruncate: 0.95, // 95% → trunca conversa
 };
 ```
 
-## 4. Memória de Sessão
+## 3. Memória de Sessão
 
 Persiste durante toda a sessão do agent (enquanto o processo está rodando).
 
 ```typescript
 interface SessionMemory {
   // Estado operacional
-  mode: Mode;
-  taskStack: Task[];           // pilha de tarefas (suporta subtarefas)
+  mode: Mode;                    // modo atual (CHAT, PLAN, ACT, AUTO, RESEARCH)
+  taskStack: Task[];             // pilha de tarefas (suporta subtarefas)
 
   // Plano ativo
   activePlan: Plan | null;
-  planHistory: Plan[];         // planos anteriores da sessão
 
-  // Conversa
+  // Conversa (curta — comprimida agressivamente)
   conversation: ConversationStore;
 
-  // Cache
+  // Cache (leve — invalidação proativa)
   fileCache: FileCache;
-  toolResultCache: ToolResultCache;
 
   // Projeto
   projectContext: ProjectContext | null;
 
-  // Métricas
-  metrics: SessionMetrics;
+  // Doctor (preenchido no on-session-start)
+  doctorResult: DoctorResult | null;
+
+  // Aprovações ativas (ver prompts/approval-flow.md)
+  approvalMemory: ApprovalMemory;
 }
 ```
 
@@ -120,12 +127,10 @@ interface SessionMemory {
 interface ConversationStore {
   messages: Message[];
   totalTokens: number;
-  summaries: Summary[];        // sumarizações de trechos antigos
 
   add(message: Message): void;
   getRecent(n: number): Message[];
-  getAll(): Message[];
-  compress(): void;
+  compress(): void;            // sumariza mensagens antigas
 }
 
 interface Message {
@@ -157,7 +162,7 @@ interface FileCacheEntry {
   content: string;
   mtime: number;          // modification time — para invalidação
   readAt: number;         // quando foi lido
-  tokenCount: number;     // tokens consumidos por este conteúdo
+  tokenCount: number;     // tokens consumidos
 }
 ```
 
@@ -191,57 +196,15 @@ interface PlanStep {
 }
 ```
 
-## 5. Memória de Projeto
+## 4. Memória de Projeto (v1 — leve)
 
-Persistida no diretório do projeto. Sobrevive entre sessões.
+Na v1, a memória de projeto é mínima: apenas convenções detectadas e cache do repo-intel.
 
 ```
 .agent/
-├── memory.json          # Estado salvo da última sessão
 ├── conventions.json     # Convenções detectadas/configuradas
-├── history/
-│   ├── 2024-01-15.json  # Log de sessão por data
-│   └── 2024-01-16.json
 └── cache/
     └── repo-intel.json  # Cache do repo-intel (stack, estrutura)
-```
-
-### memory.json
-
-```json
-{
-  "lastSession": {
-    "date": "2024-01-15T14:30:00Z",
-    "mode": "ACT",
-    "lastTask": "Adicionar dark mode ao header",
-    "openIssues": [
-      "Testes de snapshot precisam atualizar"
-    ]
-  },
-  "learnedFacts": [
-    {
-      "fact": "Projeto usa Tailwind para estilos",
-      "source": "repo-intel",
-      "confidence": 1.0
-    },
-    {
-      "fact": "Testes rodam com vitest",
-      "source": "repo-intel",
-      "confidence": 1.0
-    },
-    {
-      "fact": "Deploy via Vercel",
-      "source": "user",
-      "confidence": 1.0
-    }
-  ],
-  "fileImportanceMap": {
-    "src/components/Header.tsx": "high",
-    "src/styles/theme.ts": "high",
-    "package.json": "critical",
-    "README.md": "low"
-  }
-}
 ```
 
 ### conventions.json
@@ -274,116 +237,98 @@ Persistida no diretório do projeto. Sobrevive entre sessões.
 }
 ```
 
-## 6. Memória Global
+**O que NÃO está na v1:**
+- `memory.json` com lastSession, learnedFacts, fileImportanceMap → v2
+- `history/` com logs de sessão por data → v2
+- `preferences.json` global → v2
+- `trusted-mcps.json` global → v2
+- `permissions.json` global → v2
 
-Preferências do usuário que se aplicam a todos os projetos.
-
-```
-~/.config/cli-agent/
-├── preferences.json
-├── trusted-mcps.json
-└── permissions.json
-```
-
-### preferences.json
-
-```json
-{
-  "defaultMode": "CHAT",
-  "theme": "dark",
-  "autoRetry": true,
-  "maxRetries": 3,
-  "confirmDestructive": true,
-  "defaultLLM": "claude-sonnet",
-  "locale": "pt-BR",
-  "editor": "vim"
-}
-```
-
-## 7. Fluxo de Memória no Agent Loop
+## 5. Fluxo de Memória no Agent Loop
 
 ```
 INÍCIO DA SESSÃO
     │
-    ├── Carrega memória global (~/.config/cli-agent/)
-    ├── Carrega memória de projeto (.agent/)
-    └── Inicializa memória de sessão (vazia)
+    ├── Carrega memória de projeto (.agent/conventions.json)
+    ├── Carrega cache do repo-intel (.agent/cache/)
+    ├── Inicializa memória de sessão (vazia)
+    └── Roda doctor/healthcheck → salva em sessionMemory.doctorResult
          │
          ▼
 CADA ITERAÇÃO DO LOOP
     │
     ├── Monta memória imediata:
-    │   ├── System prompt (baseado no modo)
+    │   ├── System prompt (baseado no modo + doctor result)
     │   ├── Conversation (com compressão se necessário)
     │   ├── Project context (do cache ou repo-intel)
     │   ├── Tool results recentes
-    │   └── Available tools (filtrados pelo modo)
+    │   └── Available tools (filtrados pelo modo + doctor)
     │
     ├── Após execução:
     │   ├── Atualiza conversation com resposta
     │   ├── Atualiza file cache se leu/editou arquivo
     │   ├── Atualiza plan state se está em modo PLAN/AUTO
-    │   └── Atualiza tool result cache
+    │   └── Atualiza approval memory se houve aprovação
     │
     └── Periodicamente:
-        ├── Persiste session state em .agent/memory.json
-        └── Atualiza .agent/conventions.json se aprendeu algo novo
+        └── Atualiza .agent/conventions.json se detectou algo novo
              │
              ▼
 FIM DA SESSÃO
     │
-    ├── Salva resumo da sessão em .agent/history/
-    ├── Atualiza .agent/memory.json
+    ├── Atualiza .agent/conventions.json (se mudou)
     └── Limpa memória de sessão
 ```
 
-## 8. Limites e Proteções
+## 6. Limites e Proteções
 
 ```typescript
 const MEMORY_LIMITS = {
   // Memória imediata
   maxContextTokens: 128_000,      // depende do modelo
   maxToolResults: 20,              // resultados mantidos no contexto
-  maxFilesCached: 50,              // arquivos no cache
+  maxFilesCached: 30,              // arquivos no cache (reduzido para v1)
 
   // Memória de sessão
-  maxConversationMessages: 500,    // mensagens antes de forçar compressão
-  maxPlanHistory: 10,              // planos mantidos
-  maxSessionDuration: 8 * 3600,    // 8 horas
+  maxConversationMessages: 200,    // mensagens antes de forçar compressão (reduzido)
+  maxSessionDuration: 4 * 3600,    // 4 horas (conservador na v1)
 
   // Memória de projeto
-  maxMemoryFileSize: 1_048_576,    // 1MB para memory.json
-  maxHistoryFiles: 30,             // últimos 30 dias
-  maxLearnedFacts: 200,            // fatos aprendidos
-
-  // Memória global
-  maxTrustedMCPs: 50,
+  maxConventionsFileSize: 102_400, // 100KB para conventions.json
+  maxCacheSize: 524_288,           // 512KB para cache total
 };
 ```
 
-## 9. Estratégia de Recuperação
+## 7. Estratégia de Recuperação
 
 Se a memória de sessão corrompe (crash, OOM):
 
 ```typescript
 async function recoverSession(): Promise<SessionMemory> {
-  // 1. Tenta carregar último checkpoint de .agent/memory.json
-  const checkpoint = await loadCheckpoint();
-  if (checkpoint) {
-    console.log('Sessão restaurada do último checkpoint.');
-    return checkpoint;
-  }
-
-  // 2. Se não há checkpoint, inicia sessão limpa
-  console.log('Nenhum checkpoint encontrado. Iniciando sessão limpa.');
+  // Na v1, não há checkpoint. Simplesmente reinicia limpo.
+  // O conventions.json e repo-intel cache sobrevivem (estão em disco).
+  console.log('Reiniciando sessão limpa. Convenções e cache do projeto preservados.');
   return createFreshSession();
 }
 ```
 
-## 10. Privacidade e Segurança
+## 8. Privacidade e Segurança
 
-- Memória de projeto (`.agent/`) deve ser adicionada ao `.gitignore` por padrão.
+- `.agent/` deve ser adicionado ao `.gitignore` por padrão.
 - Nunca armazena tokens, senhas, API keys na memória.
 - Se detecta conteúdo sensível, substitui por placeholder: `[REDACTED]`.
-- Memória global usa permissões do filesystem do usuário.
-- Ao desinstalar o agent, a memória global pode ser limpa com `cli-agent --purge`.
+- Ao desinstalar o agent, `rm -rf .agent/` limpa tudo do projeto.
+
+## 9. Evolução para v2
+
+Quando a v1 estiver estável, as seguintes features podem ser adicionadas:
+
+| Feature | Justificativa | Risco |
+|---|---|---|
+| Memória global | Preferências cross-projeto | Privacidade, sincronização |
+| Fatos aprendidos | Agent "lembra" coisas sobre o projeto | Contexto errado, viés |
+| Histórico de sessões | Continuidade entre sessões | Tamanho, relevância |
+| File importance map | Priorizar arquivos importantes | Manutenção, stale data |
+| Trusted MCPs | Não pedir aprovação de MCPs conhecidos | Segurança |
+
+**Regra para adicionar feature de memória:** só entra quando há evidência real de que usuários precisam e quando o mecanismo de invalidação/limpeza está pronto.

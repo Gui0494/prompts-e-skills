@@ -24,12 +24,13 @@ interface HookResult {
 }
 
 // Comandos BLOQUEADOS (deny — nunca executar)
+// Organizados por plataforma para clareza.
 const BLOCKED_PATTERNS: RegExp[] = [
+  // ── Unix/Linux/macOS ──
   // Deleção destrutiva
   /rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?-[a-zA-Z]*r[a-zA-Z]*\s+\//,   // rm -rf /
   /rm\s+(-[a-zA-Z]*r[a-zA-Z]*\s+)?-[a-zA-Z]*f[a-zA-Z]*\s+\//,   // rm -fr /
   /rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?-[a-zA-Z]*r[a-zA-Z]*\s+~/,    // rm -rf ~
-  /del\s+\/[fF]\s+\/[qQ]/,                                         // del /f /q (Windows)
 
   // Formatação de disco
   /mkfs\./,
@@ -55,21 +56,49 @@ const BLOCKED_PATTERNS: RegExp[] = [
   /shutdown/,
   /reboot/,
   /init\s+[06]/,
+
+  // ── Windows (CMD) ──
+  /del\s+\/[fF]\s+\/[qQ]/,                                         // del /f /q
+  /rd\s+\/[sS]\s+\/[qQ]/,                                          // rd /s /q (recursive delete)
+  /format\s+[a-zA-Z]:/i,                                           // format C:
+  /diskpart/i,                                                      // disk partitioning
+
+  // ── Windows (PowerShell) ──
+  /Remove-Item\s+.*-Recurse\s+.*-Force/i,                          // Remove-Item -Recurse -Force
+  /Remove-Item\s+.*-Force\s+.*-Recurse/i,                          // ordem invertida
+  /Clear-Disk/i,                                                    // limpar disco
+  /Stop-Computer/i,                                                 // shutdown
+  /Restart-Computer/i,                                              // reboot
+  /Format-Volume/i,                                                 // formatar volume
 ];
 
 // Comandos que geram WARNING (ask — pedir confirmação)
 const WARN_PATTERNS: RegExp[] = [
+  // ── Unix/Linux/macOS ──
   /rm\s+-[a-zA-Z]*r/,          // rm recursivo (qualquer, não só /)
+  /sudo\s+/,                   // qualquer comando com sudo
+  /curl.*\|\s*(ba)?sh/,        // curl pipe to bash
+
+  // ── Git (cross-platform) ──
   /git\s+push\s+.*--force/,    // force push
   /git\s+reset\s+--hard/,      // reset hard
   /git\s+clean\s+-[a-zA-Z]*f/, // git clean force
+
+  // ── Package managers (cross-platform) ──
   /npm\s+publish/,              // publicar pacote
+  /npx\s+/,                    // executar pacote remoto
+
+  // ── Docker (cross-platform) ──
   /docker\s+system\s+prune/,   // limpar docker
+
+  // ── SQL (cross-platform) ──
   /drop\s+table/i,             // SQL drop
   /drop\s+database/i,          // SQL drop database
   /truncate\s+table/i,         // SQL truncate
-  /sudo\s+/,                   // qualquer comando com sudo
-  /curl.*\|\s*(ba)?sh/,        // curl pipe to bash
+
+  // ── Windows (PowerShell) ──
+  /Remove-Item\s+.*-Recurse/i, // Remove-Item recursivo (sem -Force, warn em vez de block)
+  /Set-ExecutionPolicy/i,      // mudar política de execução
 ];
 
 function preShellHook(context: { command: string; cwd: string; mode: Mode }): HookResult {

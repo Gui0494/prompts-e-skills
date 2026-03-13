@@ -116,10 +116,22 @@ DETECTAR TIPO DE PROJETO
          "Não detectei o tipo de projeto. Qual comando sobe o dev server?"
     │
     ▼
+DETECTAR PACKAGE MANAGER (para projetos Node)
+    │
+    ├── package-lock.json existe? → npm
+    ├── pnpm-lock.yaml existe? → pnpm
+    ├── yarn.lock existe? → yarn
+    ├── bun.lockb existe? → bun
+    └── Nenhum lockfile? → usar npm como fallback
+    │
+    ▼
 VERIFICAR DEPENDÊNCIAS
     │
     ├── node_modules existe? (para projetos Node)
-    │   └── NÃO → rodar npm install primeiro
+    │   └── NÃO → PEDIR APROVAÇÃO antes de instalar:
+    │        "Dependências não instaladas. Executar [npm/pnpm/yarn] install?
+    │         Isso pode demorar e modificar package-lock.json.
+    │         Classe de permissão: install. [Aprovar/Negar]"
     ├── Comando do dev server está disponível?
     │   └── NÃO → informar o que falta
     │
@@ -156,27 +168,32 @@ AGUARDAR AÇÃO DO USUÁRIO
 ## Implementação do Preview Server
 
 ```typescript
-import { spawn, ChildProcess } from 'child_process';
+// Usar execa em vez de child_process.spawn para parsing robusto de comandos,
+// tratamento de erros e compatibilidade cross-platform.
+import { execa, ExecaChildProcess } from 'execa';
 import net from 'net';
+import http from 'http';
 
 class PreviewManager {
-  private activeProcess: ChildProcess | null = null;
+  private activeProcess: ExecaChildProcess | null = null;
   private activePort: number | null = null;
 
   async start(projectType: ProjectType): Promise<PreviewResult> {
     // 1. Encontrar porta livre
     const port = await this.findFreePort(projectType.defaultPort);
 
-    // 2. Montar comando
+    // 2. Montar comando (substituir porta)
     const command = projectType.devCommand.replace('{{PORT}}', String(port));
 
-    // 3. Subir processo
-    const [cmd, ...args] = command.split(' ');
-    this.activeProcess = spawn(cmd, args, {
+    // 3. Subir processo usando execa (parsing seguro, sem split(' ') frágil)
+    this.activeProcess = execa({
+      shell: true,       // permite comandos com pipe, &&, etc.
       cwd: process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: false,
-    });
+      // cleanup automático se o parent morrer
+      cleanup: true,
+    })`${command}`;
 
     // 4. Capturar output
     let stdout = '';
@@ -185,14 +202,27 @@ class PreviewManager {
     this.activeProcess.stderr?.on('data', (d) => stderr += d.toString());
 
     // 5. Aguardar servidor ficar pronto
-    const ready = await this.waitForPort(port, 30_000);
+    // Fase 1: porta aberta (processo aceitando conexões)
+    const portOpen = await this.waitForPort(port, 30_000);
 
-    if (!ready) {
+    if (!portOpen) {
       this.stop();
       return {
         success: false,
         error: `Servidor não respondeu na porta ${port} após 30s.\nstdout: ${stdout}\nstderr: ${stderr}`,
       };
+    }
+
+    // Fase 2: healthcheck HTTP (app realmente respondendo, não só porta aberta)
+    const httpReady = await this.waitForHTTP(port, 15_000);
+
+    if (!httpReady) {
+      // Porta abriu mas HTTP não responde — pode ser que o app
+      // ainda está compilando. Avisar mas não matar.
+      console.log(chalk.yellow(
+        '⚠ Servidor aceitando conexões mas HTTP não responde ainda.\n' +
+        '  O app pode estar compilando. URL disponível mas pode não estar pronto.'
+      ));
     }
 
     this.activePort = port;
@@ -202,11 +232,13 @@ class PreviewManager {
       url: `http://localhost:${port}`,
       pid: this.activeProcess.pid!,
       port,
+      httpReady,  // indica se o healthcheck HTTP passou
     };
   }
 
   async stop(): Promise<void> {
     if (this.activeProcess) {
+      // Cross-platform: execa.kill() lida com Windows vs Unix
       this.activeProcess.kill('SIGTERM');
       // Fallback se SIGTERM não funcionar
       setTimeout(() => {
@@ -247,6 +279,29 @@ class PreviewManager {
       await new Promise(r => setTimeout(r, 500));
     }
     return false;
+  }
+
+  // Healthcheck HTTP real: não basta a porta estar aberta,
+  // o servidor precisa responder HTTP 200 (ou qualquer 2xx/3xx)
+  private async waitForHTTP(port: number, timeout: number): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const ok = await this.tryHTTP(port);
+      if (ok) return true;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    return false;
+  }
+
+  private tryHTTP(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const req = http.get(`http://localhost:${port}/`, (res) => {
+        // Qualquer resposta HTTP (mesmo 404) significa que o server está respondendo
+        resolve(res.statusCode !== undefined);
+      });
+      req.on('error', () => resolve(false));
+      req.setTimeout(3000, () => { req.destroy(); resolve(false); });
+    });
   }
 
   private tryConnect(port: number): Promise<boolean> {

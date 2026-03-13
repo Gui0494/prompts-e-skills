@@ -13,16 +13,25 @@ class ModeManager {
   private currentMode: Mode = 'CHAT';
   private modeHistory: Mode[] = [];
 
-  switch(newMode: Mode): void {
-    // Validar transição
+  // Nota: async porque AUTO requer confirmação do usuário (I/O)
+  async switch(newMode: Mode): Promise<void> {
+    // Validar transição (ver contracts.md seção 1 — VALID_TRANSITIONS)
     if (!this.isValidTransition(this.currentMode, newMode)) {
       throw new Error(`Transição ${this.currentMode} → ${newMode} não permitida`);
+    }
+
+    // PLAN → ACT requer plano aprovado
+    if (this.currentMode === 'PLAN' && newMode === 'ACT' && !this.hasApprovedPlan()) {
+      throw new Error('Transição PLAN → ACT requer plano aprovado pelo usuário.');
     }
 
     // AUTO requer confirmação do usuário
     if (newMode === 'AUTO') {
       const confirmed = await this.requestConfirmation(
-        'Modo AUTO executa ações automaticamente. Confirma?'
+        'Modo AUTO executa ações automaticamente.\n' +
+        'Permissões liberadas: read, write-local, shell-safe, git-local, network, preview.\n' +
+        'Ações críticas (shell-unsafe, git-remote, install, deploy, publish) ainda pedirão confirmação.\n' +
+        'Confirma?'
       );
       if (!confirmed) return;
     }
@@ -30,7 +39,8 @@ class ModeManager {
     this.modeHistory.push(this.currentMode);
     this.currentMode = newMode;
 
-    // Atualizar tools disponíveis
+    // Atualizar tools disponíveis conforme matriz de permissões
+    // Referência: contracts.md seção 5 — MODE_PERMISSION_MATRIX
     this.updateAvailableTools(newMode);
 
     // Atualizar system prompt
@@ -41,12 +51,9 @@ class ModeManager {
   }
 
   private isValidTransition(from: Mode, to: Mode): boolean {
-    // Todas as transições são válidas exceto:
-    // - AUTO → AUTO (já está em auto)
-    // - PLAN → ACT sem aprovação de plano
-    if (from === 'AUTO' && to === 'AUTO') return false;
-    if (from === 'PLAN' && to === 'ACT' && !this.hasPlanApproved()) return false;
-    return true;
+    // Referência canônica: contracts.md seção 1 — VALID_TRANSITIONS
+    const validTargets = VALID_TRANSITIONS[from];
+    return validTargets.includes(to);
   }
 }
 ```
@@ -145,12 +152,31 @@ const ACT_CONFIG = {
 
 ```typescript
 const AUTO_CONFIG = {
-  allowedTools: ['*'],
-  toolPermissions: {
-    '*': 'allow',  // pré-aprovado pelo usuário
+  // Referência: contracts.md seção 5 — MODE_PERMISSION_MATRIX[AUTO]
+  // Aprovação inicial NÃO é cheque em branco.
+  permissionsByClass: {
+    'read':          'allow',     // liberado
+    'write-local':   'allow',     // liberado
+    'shell-safe':    'allow',     // liberado
+    'shell-unsafe':  'ask',       // SEMPRE pede
+    'git-local':     'allow',     // liberado
+    'git-remote':    'ask',       // SEMPRE pede
+    'network':       'allow',     // liberado
+    'install':       'ask',       // SEMPRE pede
+    'preview':       'allow',     // liberado
+    'deploy':        'deny',      // NUNCA em AUTO
+    'publish':       'deny',      // NUNCA em AUTO
+    'db-write':      'deny',      // NUNCA em AUTO
   },
   systemPromptAddition: `
     Você está em modo AUTO. Execute o plano automaticamente.
+
+    Permissões liberadas: leitura, escrita local, shell seguro, git local, rede, preview.
+    Ações que SEMPRE pedem confirmação mesmo em AUTO:
+    - Comandos potencialmente destrutivos (shell-unsafe)
+    - Git push (git-remote)
+    - Instalação de dependências (install)
+    Ações PROIBIDAS em AUTO: deploy, publish, db-write.
 
     Loop:
     1. Analise o próximo passo do plano.

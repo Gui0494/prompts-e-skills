@@ -26,36 +26,44 @@ async function postTaskHook(context: {
   workspacePath: string;
   session: SessionMemory;
 }): Promise<HookResult> {
-  const { task, workspacePath } = context;
+  const { task, workspacePath, session } = context;
 
-  // 1. Gerar diff de todas as mudanças
-  const diff = await shell('git diff');
-  const stagedDiff = await shell('git diff --cached');
-  const untrackedFiles = await shell('git ls-files --others --exclude-standard');
+  // Verificar se Git está disponível (via doctor result ou tentativa)
+  const hasGit = session.doctorResult?.checks.find(c => c.name === 'git')?.status === 'ok'
+    ?? await isGitAvailable(workspacePath);
 
-  // 2. Listar arquivos modificados
-  const modifiedFiles = await shell('git diff --name-only');
-  const addedFiles = await shell('git diff --cached --name-only --diff-filter=A');
+  let diff = '';
+  let modifiedFiles: string[] = [];
+  let addedFiles: string[] = [];
+
+  if (hasGit) {
+    // 1. Gerar diff de todas as mudanças
+    diff = await shell('git diff');
+    const stagedDiff = await shell('git diff --cached');
+    const untrackedFiles = await shell('git ls-files --others --exclude-standard');
+
+    // 2. Listar arquivos modificados
+    modifiedFiles = (await shell('git diff --name-only')).split('\n').filter(Boolean);
+    addedFiles = (await shell('git diff --cached --name-only --diff-filter=A')).split('\n').filter(Boolean);
+  } else {
+    // Fallback sem Git: usar file cache da sessão para determinar o que mudou
+    modifiedFiles = session.fileCache
+      ? Array.from(session.fileCache.entries.keys()).filter(p =>
+          task.touchedFiles?.includes(p)
+        )
+      : task.touchedFiles ?? [];
+    diff = '(Git não disponível — diff não gerado)';
+  }
 
   // 3. Gerar resumo
   const summary = generateSummary(task, {
-    modifiedFiles: modifiedFiles.split('\n').filter(Boolean),
-    addedFiles: addedFiles.split('\n').filter(Boolean),
-    diff: diff,
+    modifiedFiles,
+    addedFiles,
+    diff,
     duration: Date.now() - task.startedAt,
     toolCalls: task.toolCallCount,
     autoCorrections: task.autoCorrections,
-  });
-
-  // 4. Salvar em .agent/history/
-  const today = new Date().toISOString().split('T')[0];
-  const historyFile = `.agent/history/${today}.json`;
-  await appendToHistory(historyFile, {
-    timestamp: new Date().toISOString(),
-    task: task.description,
-    summary,
-    filesModified: modifiedFiles.split('\n').filter(Boolean),
-    filesAdded: addedFiles.split('\n').filter(Boolean),
+    hasGit,
   });
 
   // 5. Exibir ao usuário
